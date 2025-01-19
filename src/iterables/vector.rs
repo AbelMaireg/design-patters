@@ -1,5 +1,5 @@
 use std::alloc::{self, Layout};
-use std::mem::{self, ManuallyDrop};
+use std::mem::{self};
 use std::ops::{Deref, DerefMut};
 use std::ptr::{self, NonNull};
 
@@ -7,41 +7,17 @@ use crate::iterator::{IntoIteratorII, Iterator};
 
 #[allow(dead_code)]
 #[derive(Debug)]
-pub struct VecII<T> {
+struct RawVec<T> {
     ptr: NonNull<T>,
-    size: usize,
     capacity: usize,
 }
 
-unsafe impl<T: Send> Send for VecII<T> {}
-unsafe impl<T: Sync> Sync for VecII<T> {}
-
-impl<T> Default for VecII<T> {
-    fn default() -> Self {
-        VecII {
+impl<T> RawVec<T> {
+    fn new() -> Self {
+        RawVec {
             ptr: NonNull::dangling(),
-            size: 0,
             capacity: 0,
         }
-    }
-}
-
-#[allow(dead_code)]
-impl<T> VecII<T> {
-    pub fn new() -> VecII<T> {
-        VecII {
-            ptr: NonNull::dangling(),
-            size: 0,
-            capacity: 0,
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        self.size
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     fn grow(&mut self) {
@@ -73,14 +49,71 @@ impl<T> VecII<T> {
         };
         self.capacity = new_cap;
     }
+}
+
+impl<T> Drop for RawVec<T> {
+    fn drop(&mut self) {
+        if self.capacity != 0 {
+            let layout = Layout::array::<T>(self.capacity).unwrap();
+            unsafe {
+                alloc::dealloc(self.ptr.as_ptr() as *mut u8, layout);
+            }
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
+pub struct VecII<T> {
+    buf: RawVec<T>,
+    size: usize,
+}
+
+unsafe impl<T: Send> Send for VecII<T> {}
+unsafe impl<T: Sync> Sync for VecII<T> {}
+
+impl<T> Default for VecII<T> {
+    fn default() -> Self {
+        VecII {
+            buf: RawVec::new(),
+            size: 0,
+        }
+    }
+}
+
+#[allow(dead_code)]
+impl<T> VecII<T> {
+    pub fn new() -> VecII<T> {
+        std::default::Default::default()
+    }
+
+    pub fn len(&self) -> usize {
+        self.size
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.buf.capacity
+    }
+
+    pub fn ptr(&self) -> *const T {
+        self.buf.ptr.as_ptr()
+    }
+
+    pub fn ptr_mut(&mut self) -> *mut T {
+        self.buf.ptr.as_ptr()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 
     pub fn push(&mut self, value: T) {
-        if self.size == self.capacity {
-            self.grow();
+        if self.size == self.capacity() {
+            self.buf.grow();
         }
 
         unsafe {
-            ptr::write(self.ptr.as_ptr().add(self.len()), value);
+            ptr::write(self.ptr_mut().add(self.len()), value);
         }
 
         self.size += 1;
@@ -91,24 +124,24 @@ impl<T> VecII<T> {
             None
         } else {
             self.size -= 1;
-            unsafe { Some(ptr::read(self.ptr.as_ptr().add(self.size))) }
+            unsafe { Some(ptr::read(self.ptr().add(self.size))) }
         }
     }
 
     pub fn insert(&mut self, index: usize, value: T) {
         assert!(index <= self.size, "index out of bould");
-        if self.size == self.capacity {
-            self.grow()
+        if self.size == self.capacity() {
+            self.buf.grow()
         }
 
         unsafe {
             ptr::copy(
-                self.ptr.as_ptr().add(index),
-                self.ptr.as_ptr().add(index + 1),
+                self.ptr_mut().add(index),
+                self.ptr_mut().add(index + 1),
                 self.size - index,
             );
 
-            ptr::write(self.ptr.as_ptr().add(index), value);
+            ptr::write(self.ptr_mut().add(index), value);
         }
         self.size += 1;
     }
@@ -117,10 +150,10 @@ impl<T> VecII<T> {
         assert!(index < self.size, "index out of bound");
 
         unsafe {
-            let result = ptr::read(self.ptr.as_ptr().add(index));
+            let result = ptr::read(self.ptr().add(index));
             ptr::copy(
-                self.ptr.as_ptr().add(index + 1),
-                self.ptr.as_ptr().add(index),
+                self.ptr_mut().add(index + 1),
+                self.ptr_mut().add(index),
                 self.size - index,
             );
             self.size -= 1;
@@ -132,29 +165,24 @@ impl<T> VecII<T> {
 impl<T> Deref for VecII<T> {
     type Target = [T];
     fn deref(&self) -> &Self::Target {
-        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr(), self.len()) }
+        unsafe { std::slice::from_raw_parts(self.ptr(), self.len()) }
     }
 }
 
 impl<T> DerefMut for VecII<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len()) }
+        unsafe { std::slice::from_raw_parts_mut(self.ptr_mut(), self.len()) }
     }
 }
 
 impl<T> Drop for VecII<T> {
     fn drop(&mut self) {
-        if self.capacity != 0 {
+        if self.capacity() != 0 {
             loop {
                 let item = self.pop();
                 if item.is_none() {
                     break;
                 }
-            }
-
-            let layout = Layout::array::<T>(self.capacity).unwrap();
-            unsafe {
-                alloc::dealloc(self.ptr.as_ptr() as *mut u8, layout);
             }
         }
     }
@@ -162,8 +190,7 @@ impl<T> Drop for VecII<T> {
 
 #[allow(dead_code)]
 pub struct IntoIter<T> {
-    buf: NonNull<T>,
-    capacity: usize,
+    _buf: RawVec<T>,
     start: *const T,
     end: *const T,
 }
@@ -172,33 +199,25 @@ impl<T> IntoIteratorII<T> for VecII<T> {
     type Item = T;
     type IntoIter = IntoIter<T>;
     fn into_iterII(self) -> Self::IntoIter {
-        let vec = ManuallyDrop::new(self);
-
-        let ptr = vec.ptr;
-        let capacity = vec.capacity;
-        let len = vec.size;
+        let buf = unsafe { ptr::read(&self.buf) };
+        let len = self.size;
+        mem::forget(self);
 
         IntoIter {
-            buf: ptr,
-            capacity,
-            start: ptr.as_ptr(),
-            end: if capacity == 0 {
-                ptr.as_ptr()
+            start: buf.ptr.as_ptr(),
+            end: if buf.capacity == 0 {
+                buf.ptr.as_ptr()
             } else {
-                unsafe { ptr.as_ptr().add(len) }
+                unsafe { buf.ptr.as_ptr().add(len) }
             },
+            _buf: buf,
         }
     }
 }
 
 impl<T> Drop for IntoIter<T> {
     fn drop(&mut self) {
-        if self.capacity != 0 {
-            let layout = Layout::array::<T>(self.capacity).unwrap();
-            unsafe {
-                alloc::dealloc(self.buf.as_ptr() as *mut u8, layout);
-            }
-        }
+        while self.next().is_some() {}
     }
 }
 
@@ -242,16 +261,16 @@ mod test {
     #[test]
     fn test_capacity() {
         let mut list = VecII::<i32>::new();
-        assert_eq!(list.capacity, 0);
+        assert_eq!(list.capacity(), 0);
 
-        list.grow();
-        assert_eq!(list.capacity, 1);
+        list.buf.grow();
+        assert_eq!(list.capacity(), 1);
 
-        list.grow();
-        assert_eq!(list.capacity, 2);
+        list.buf.grow();
+        assert_eq!(list.capacity(), 2);
 
-        list.grow();
-        assert_eq!(list.capacity, 4);
+        list.buf.grow();
+        assert_eq!(list.capacity(), 4);
     }
 
     #[test]
