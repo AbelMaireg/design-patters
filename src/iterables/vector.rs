@@ -1,5 +1,6 @@
 use std::alloc::{self, Layout};
 use std::mem::{self, ManuallyDrop};
+use std::ops::{Deref, DerefMut};
 use std::ptr::{self, NonNull};
 
 use crate::iterator::{IntoIteratorII, Iterator};
@@ -11,6 +12,9 @@ pub struct VecII<T> {
     size: usize,
     capacity: usize,
 }
+
+unsafe impl<T: Send> Send for VecII<T> {}
+unsafe impl<T: Sync> Sync for VecII<T> {}
 
 impl<T> Default for VecII<T> {
     fn default() -> Self {
@@ -88,6 +92,70 @@ impl<T> VecII<T> {
         } else {
             self.size -= 1;
             unsafe { Some(ptr::read(self.ptr.as_ptr().add(self.size))) }
+        }
+    }
+
+    pub fn insert(&mut self, index: usize, value: T) {
+        assert!(index <= self.size, "index out of bould");
+        if self.size == self.capacity {
+            self.grow()
+        }
+
+        unsafe {
+            ptr::copy(
+                self.ptr.as_ptr().add(index),
+                self.ptr.as_ptr().add(index + 1),
+                self.size - index,
+            );
+
+            ptr::write(self.ptr.as_ptr().add(index), value);
+        }
+        self.size += 1;
+    }
+
+    pub fn remove(&mut self, index: usize) -> T {
+        assert!(index < self.size, "index out of bound");
+
+        unsafe {
+            let result = ptr::read(self.ptr.as_ptr().add(index));
+            ptr::copy(
+                self.ptr.as_ptr().add(index + 1),
+                self.ptr.as_ptr().add(index),
+                self.size - index,
+            );
+            self.size -= 1;
+            result
+        }
+    }
+}
+
+impl<T> Deref for VecII<T> {
+    type Target = [T];
+    fn deref(&self) -> &Self::Target {
+        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr(), self.len()) }
+    }
+}
+
+impl<T> DerefMut for VecII<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len()) }
+    }
+}
+
+impl<T> Drop for VecII<T> {
+    fn drop(&mut self) {
+        if self.capacity != 0 {
+            loop {
+                let item = self.pop();
+                if item.is_none() {
+                    break;
+                }
+            }
+
+            let layout = Layout::array::<T>(self.capacity).unwrap();
+            unsafe {
+                alloc::dealloc(self.ptr.as_ptr() as *mut u8, layout);
+            }
         }
     }
 }
@@ -198,5 +266,26 @@ mod test {
         assert_eq!(it.next(), Some(33));
         assert_eq!(it.next(), Some(44));
         assert_eq!(it.next(), None);
+    }
+
+    #[test]
+    fn test_deref() {
+        let mut list = VecII::<i32>::new();
+        list.push(22);
+
+        for _ in &(*list) {}
+    }
+
+    #[test]
+    fn test_insert_remove() {
+        let mut list = VecII::<i32>::new();
+        list.push(1);
+        list.push(2);
+        list.insert(1, 22);
+        list.insert(2, 23);
+
+        assert_eq!(list.remove(1), 22);
+        assert_eq!(list.remove(1), 23);
+        assert_eq!(list.remove(0), 1);
     }
 }
