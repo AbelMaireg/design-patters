@@ -1,3 +1,18 @@
+pub mod blocks;
+pub mod client;
+pub mod request;
+
+use crate::request::Request;
+
+use crate::client::Client;
+
 fn main() {
-    println!("Hello, world!");
+    let client = Client::new();
+
+    let request: Request = Request {
+        name: "administrator".to_string(),
+        password: "123456".to_string(),
+    };
+
+    client.process(request);
 }
