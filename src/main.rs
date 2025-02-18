@@ -9,7 +9,7 @@ use crate::client::Client;
 fn main() {
     let client = Client::new();
 
-    let request: Request = Request {
+    let request = Request {
         name: "administrator".to_string(),
         password: "123456".to_string(),
     };
