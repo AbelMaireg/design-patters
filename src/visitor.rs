@@ -4,10 +4,16 @@ pub trait Visitor {
     fn visit_vec(&self, v: Vec<i32>) -> Self::Value;
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq)]
 pub struct TwoValueStruct {
     a: i32,
     b: i32,
+}
+
+impl TwoValueStruct {
+    pub fn new(a: i32, b: i32) -> Self {
+        Self { a, b }
+    }
 }
 
 impl Visitor for TwoValueStruct {
@@ -18,8 +24,14 @@ impl Visitor for TwoValueStruct {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq)]
 pub struct TwoValueArray([i32; 2]);
+
+impl TwoValueArray {
+    pub fn new(a: i32, b: i32) -> Self {
+        Self([a, b])
+    }
+}
 
 impl Visitor for TwoValueArray {
     type Value = TwoValueArray;
