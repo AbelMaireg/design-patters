@@ -1,18 +1,23 @@
-pub mod factory;
+pub mod builder;
+pub mod computer;
 
 #[cfg(test)]
 mod test {
-    use crate::factory::*;
+    use crate::{
+        builder::{ComputerBuilder, Director},
+        computer::Computer,
+    };
 
     #[test]
-    fn test_chocolate_factory() {
-        let bakery = ChocolateBakery;
-        assert_eq!(bakery.bake_cake(), "chocolate cake");
-    }
+    fn test_builder() {
+        let mut builder = Computer::default();
 
-    #[test]
-    fn test_vanilla_factory() {
-        let bakery = VanillaBakery;
-        assert_eq!(bakery.bake_cake(), "vanilla cake")
+        Director::construct_gaming_computer(&mut builder);
+        let gaming_computer = builder.build();
+        assert_eq!(gaming_computer.cpu, "Intel Core i9");
+
+        Director::construct_office_computer(&mut builder);
+        let office_computer = builder.build();
+        assert_eq!(office_computer.cpu, "Intel Core i5");
     }
 }
